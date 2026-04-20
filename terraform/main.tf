@@ -41,7 +41,7 @@ resource "aws_s3_bucket_public_access_block" "public_access" {
 # Adding index file to the bucket
 resource "aws_s3_object" "index_file" {
   bucket       = aws_s3_bucket.host-bucket.id
-  key   = "index.html"
+  key          = "index.html"
   source       = "${path.module}/index.html"
   content_type = "text/html"
 }
@@ -68,10 +68,10 @@ resource "aws_s3_bucket_policy" "host-bucket-policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
+        Effect    = "Allow"
         Principal = "*"
-        Action  = "s3:GetObject"
-        Resource     = "${aws_s3_bucket.host-bucket.arn}/*"
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.host-bucket.arn}/*"
       }
     ]
   })
@@ -81,3 +81,5 @@ resource "aws_s3_bucket_policy" "host-bucket-policy" {
 output "s3-url" {
   value = aws_s3_bucket_website_configuration.website.website_endpoint
 }
+
+# commenting to trigger the workflow
