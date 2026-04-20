@@ -77,7 +77,7 @@ resource "aws_s3_bucket_policy" "host-bucket-policy" {
   })
 }
 
-# This gives you the URL to access
-output "s3-url" {
-  value = aws_s3_bucket_website_configuration.website.website_endpoint
-}
+# # This gives you the URL to access
+# output "s3-url" {
+#   value = aws_s3_bucket_website_configuration.website.website_endpoint
+# }
