@@ -53,11 +53,12 @@ jobs:
           pip install --user "detect-secrets>=1.5.0" >>"$LOG_FILE" 2>&1
           export PATH="$HOME/.local/bin:$PATH"
           set +e
+          # --exclude-files values are Python regexes (not globs). Avoid ** which is invalid.
           detect-secrets scan --all-files \
-            --exclude-files '.git/**' \
-            --exclude-files '.terraform/**' \
-            --exclude-files '.ci-logs/**' \
-            --exclude-files '*.tfstate*' \
+            --exclude-files '(^|/)\.git(/|$)' \
+            --exclude-files '(^|/)\.terraform(/|$)' \
+            --exclude-files '(^|/)\.ci-logs(/|$)' \
+            --exclude-files '\.tfstate' \
             . > /tmp/secrets.json 2> /tmp/secrets.err
           SCAN_EXIT=$?
           set -e
