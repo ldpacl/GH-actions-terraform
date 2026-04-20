@@ -40,9 +40,9 @@ resource "aws_s3_bucket_public_access_block" "public_access" {
 
 # Adding index file to the bucket
 resource "aws_s3_object" "index_file" {
-  bucket = aws_s3_bucket.host-bucket.id
-  key    = "index.html"
-  source = "${path.module}/index.html"
+  bucket       = aws_s3_bucket.host-bucket.id
+  key          = "index.html"
+  source       = "${path.module}/index.html"
   content_type = "text/html"
 }
 
