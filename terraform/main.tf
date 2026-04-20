@@ -59,6 +59,11 @@ resource "aws_s3_bucket_website_configuration" "website" {
 resource "aws_s3_bucket_policy" "host-bucket-policy" {
   bucket = aws_s3_bucket.host-bucket.id
 
+  depends_on = [
+    aws_s3_bucket_public_access_block.public_access,
+    aws_s3_bucket_ownership_controls.ownership,
+  ]
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
