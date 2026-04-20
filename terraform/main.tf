@@ -39,12 +39,12 @@ resource "aws_s3_bucket_public_access_block" "public_access" {
 }
 
 # Adding index file to the bucket
-resource "aws_s3_object" "index_file" {
-  bucket       = aws_s3_bucket.host-bucket.id
-  key          = "index.html"
-  source       = "${path.module}/index.html"
-  content_type = "text/html"
-}
+# resource "aws_s3_object" "index_file" {
+#   bucket       = aws_s3_bucket.host-bucket.id
+#   key          = "index.html"
+#   source       = "${path.module}/index.html"
+#   content_type = "text/html"
+# }
 
 # Setting website configuration for the bucket
 resource "aws_s3_bucket_website_configuration" "website" {
@@ -77,7 +77,7 @@ resource "aws_s3_bucket_policy" "host-bucket-policy" {
   })
 }
 
-# # This gives you the URL to access
-# output "s3-url" {
-#   value = aws_s3_bucket_website_configuration.website.website_endpoint
-# }
+# This gives you the URL to access
+output "s3-url" {
+  value = aws_s3_bucket_website_configuration.website.website_endpoint
+}
