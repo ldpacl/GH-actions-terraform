@@ -22,7 +22,7 @@ resource "aws_s3_bucket" "host-bucket" {
 
 # Enforcing object ownership controls
 resource "aws_s3_bucket_ownership_controls" "ownership" {
-  bucket= aws_s3_bucket.host-bucket.id
+  bucket = aws_s3_bucket.host-bucket.id
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
@@ -32,17 +32,17 @@ resource "aws_s3_bucket_ownership_controls" "ownership" {
 resource "aws_s3_bucket_public_access_block" "public_access" {
   bucket = aws_s3_bucket.host-bucket.id
 
-  block_public_acls     = false
+  block_public_acls       = false
   block_public_policy     = false
-  ignore_public_acls  = false
+  ignore_public_acls      = false
   restrict_public_buckets = false
 }
 
 # Adding index file to the bucket
 resource "aws_s3_object" "index_file" {
-  bucket    = aws_s3_bucket.host-bucket.id
+  bucket       = aws_s3_bucket.host-bucket.id
   key          = "index.html"
-  source     = "${path.module}/index.html"
+  source       = "${path.module}/index.html"
   content_type = "text/html"
 }
 
