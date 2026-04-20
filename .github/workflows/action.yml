@@ -3,14 +3,14 @@ name: "Terraform Workflow with GitHub Actions"
 on:
   pull_request:
     branches:
-    - main
+      - main
     paths:
-    - terraform/**
+      - terraform/**
   push:
     branches:
-    - main
+      - main
     paths:
-    - terraform/**
+      - terraform/**
 
 permissions:
   contents: read
@@ -18,6 +18,7 @@ permissions:
   pull-requests: write
 
 env:
+  TF_LOG: INFO
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
   BUCKET_TF_STATE: ${{ secrets.BUCKET_TF_STATE }}
@@ -27,7 +28,7 @@ jobs:
   terraform:
     name: "Terraform Workflow"
     runs-on: ubuntu-latest
-    defaults: 
+    defaults:
       run:
         shell: bash
         working-directory: ./terraform
@@ -38,57 +39,204 @@ jobs:
 
       - name: Setup Terraform with latest version
         uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
 
       - name: Terraform init
-        id: init 
-        run: terraform init -backend-config="bucket=$BUCKET_TF_STATE"
+        id: init
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/init.log"
+          terraform init -backend-config="bucket=$BUCKET_TF_STATE" 2>&1 | tee "$LOG_FILE"
+          EXIT=${PIPESTATUS[0]}
+          if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
+            printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
+            tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
+            mv "${LOG_FILE}.new" "$LOG_FILE"
+          fi
+          delim="INITLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
+          {
+            echo "log<<$delim"
+            cat "$LOG_FILE"
+            echo "$delim"
+          } >>"$GITHUB_OUTPUT"
+          exit "$EXIT"
 
       - name: Terraform format
         id: format
-        run: terraform fmt -check
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/format.log"
+          terraform fmt -check 2>&1 | tee "$LOG_FILE"
+          EXIT=${PIPESTATUS[0]}
+          if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
+            printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
+            tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
+            mv "${LOG_FILE}.new" "$LOG_FILE"
+          fi
+          delim="FMTLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
+          {
+            echo "log<<$delim"
+            cat "$LOG_FILE"
+            echo "$delim"
+          } >>"$GITHUB_OUTPUT"
+          exit "$EXIT"
 
       - name: Terraform validate
         id: validate
-        run: terraform validate
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/validate.log"
+          terraform validate 2>&1 | tee "$LOG_FILE"
+          EXIT=${PIPESTATUS[0]}
+          if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
+            printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
+            tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
+            mv "${LOG_FILE}.new" "$LOG_FILE"
+          fi
+          delim="VALLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
+          {
+            echo "log<<$delim"
+            cat "$LOG_FILE"
+            echo "$delim"
+          } >>"$GITHUB_OUTPUT"
+          exit "$EXIT"
 
       - name: Terraform plan
         id: plan
         if: github.event_name == 'pull_request'
-        run: terraform plan -no-color -input=false
         continue-on-error: true
+        run: |
+          set -o pipefail
+          LOG_FILE="$RUNNER_TEMP/plan.log"
+          terraform plan -no-color -input=false 2>&1 | tee "$LOG_FILE"
+          EXIT=${PIPESTATUS[0]}
+          if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
+            printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
+            tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
+            mv "${LOG_FILE}.new" "$LOG_FILE"
+          fi
+          delim="PLANLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
+          {
+            echo "log<<$delim"
+            cat "$LOG_FILE"
+            echo "$delim"
+          } >>"$GITHUB_OUTPUT"
+          exit "$EXIT"
 
       - uses: actions/github-script@v7
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         env:
-          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
-          FORMAT_OUTCOME: ${{ steps.format.outcome }}
           INIT_OUTCOME: ${{ steps.init.outcome }}
+          FORMAT_OUTCOME: ${{ steps.format.outcome }}
           VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          INIT_LOG: ${{ steps.init.outputs.log }}
+          FORMAT_LOG: ${{ steps.format.outputs.log }}
+          VALIDATE_LOG: ${{ steps.validate.outputs.log }}
+          PLAN_LOG: ${{ steps.plan.outputs.log }}
         with:
           script: |
-            const output = `#### Terraform Format and Style \`${process.env.FORMAT_OUTCOME}\`
-            #### Terraform Initialization \`${process.env.INIT_OUTCOME}\`
-            #### Terraform Validation \`${process.env.VALIDATE_OUTCOME}\`
-            #### Terraform Plan \`${process.env.PLAN_OUTCOME}\`
+            const marker = '<!-- gh-actions-terraform-ci-report -->';
 
-            <details><summary>Terraform Plan</summary>
+            function escFence(s) {
+              // Break accidental ``` sequences so they do not terminate the markdown fence.
+              return String(s || '_No output captured._').replace(/```/g, '`\u200b``');
+            }
 
-            \`\`\`
-            ${process.env.PLAN}
-            \`\`\`
+            function section(title, outcome, log) {
+              const icon =
+                outcome === 'success'
+                  ? '✅'
+                  : outcome === 'failure'
+                    ? '❌'
+                    : outcome === 'skipped'
+                      ? '⏭️'
+                      : '❔';
+              const reason =
+                outcome === 'failure'
+                  ? 'This step failed; see output below for the Terraform message.'
+                  : outcome === 'skipped'
+                    ? 'This step did not run for this event.'
+                    : 'Completed without errors (exit code 0).';
+              return [
+                `### ${icon} ${title}`,
+                '',
+                `**Result:** \`${outcome}\` — ${reason}`,
+                '',
+                '<details><summary>Command output</summary>',
+                '',
+                '```text',
+                escFence(log),
+                '```',
+                '',
+                '</details>',
+              ].join('\n');
+            }
 
-            </details>
-            *Pushed by: @${process.env.GITHUB_ACTOR}, Action: \`${process.env.GITHUB_EVENT_NAME}\`*`;
+            const outcomes = [
+              process.env.INIT_OUTCOME,
+              process.env.FORMAT_OUTCOME,
+              process.env.VALIDATE_OUTCOME,
+              process.env.PLAN_OUTCOME,
+            ];
+            const summaryLine = outcomes.some((o) => o === 'failure')
+              ? '**Overall:** at least one check failed. Fix the issues below before merging.'
+              : '**Overall:** all executed checks passed.';
 
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            const body = [
+              marker,
+              '## Terraform CI report',
+              '',
+              summaryLine,
+              '',
+              section('Terraform init', process.env.INIT_OUTCOME, process.env.INIT_LOG),
+              '',
+              section('Terraform format (`fmt -check`)', process.env.FORMAT_OUTCOME, process.env.FORMAT_LOG),
+              '',
+              section('Terraform validate', process.env.VALIDATE_OUTCOME, process.env.VALIDATE_LOG),
+              '',
+              section('Terraform plan', process.env.PLAN_OUTCOME, process.env.PLAN_LOG),
+              '',
+              `*Workflow: \`${process.env.GITHUB_RUN_ID}\` · Actor: @${process.env.GITHUB_ACTOR}*`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
+              issue_number: context.issue.number,
+              per_page: 100,
             });
-      - name: Terraform Plan Status
-        if: steps.plan.outcome == 'failure'
+
+            const existing = comments.find((c) => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail PR if any Terraform check failed
+        if: >-
+          always() &&
+          github.event_name == 'pull_request' &&
+          (steps.init.outcome == 'failure' ||
+           steps.format.outcome == 'failure' ||
+           steps.validate.outcome == 'failure' ||
+           steps.plan.outcome == 'failure')
         run: exit 1
 
       - name: Terraform Apply
