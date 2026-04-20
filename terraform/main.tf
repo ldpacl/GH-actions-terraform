@@ -81,5 +81,3 @@ resource "aws_s3_bucket_policy" "host-bucket-policy" {
 output "s3-url" {
   value = aws_s3_bucket_website_configuration.website.website_endpoint
 }
-
-# commenting to trigger the workflow
