@@ -1,16 +1,19 @@
-# GH-actions-terraform
+﻿# GH-actions-terraform
 
 Repo to test GitHub Actions to automate a Terraform workflow.
 
 ## Requirements
 
-No requirements.
+| Name | Version |
+|------|---------|
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.6.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 5.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.41.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 5.0 |
 
 ## Modules
 
@@ -35,4 +38,4 @@ No inputs.
 
 | Name | Description |
 |------|-------------|
-| <a name="output_s3-url"></a> [s3-url](#output\_s3-url) | This gives you the URL to access |
+| <a name="output_s3_url"></a> [s3\_url](#output\_s3\_url) | Public website endpoint for the S3 bucket. |

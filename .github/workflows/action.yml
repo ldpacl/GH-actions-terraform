@@ -226,7 +226,6 @@ jobs:
           FORMAT_OUTCOME: ${{ steps.format.outcome }}
           TFLINT_OUTCOME: ${{ steps.tflint.outcome }}
           VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
-          TFDOCS_OUTCOME: ${{ steps.tfdocs.outcome }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
         with:
           script: |
@@ -307,8 +306,6 @@ jobs:
               section('TFLint', process.env.TFLINT_OUTCOME, readLog('tflint')),
               '',
               section('Terraform validate', process.env.VALIDATE_OUTCOME, readLog('validate')),
-              '',
-              section('terraform-docs (README.md update, non-blocking)', process.env.TFDOCS_OUTCOME, readLog('tfdocs')),
               '',
               section('Terraform plan', process.env.PLAN_OUTCOME, readLog('plan')),
               '',
