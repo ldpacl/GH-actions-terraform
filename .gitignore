@@ -1,3 +1,6 @@
+# CI runner log snapshots (written by GitHub Actions, not for commit)
+.ci-logs/
+
 # Local .terraform directories
 .terraform/
 
