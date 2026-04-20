@@ -3,7 +3,7 @@ terraform {
 
   required_providers {
     aws = {
-      source = "hashicorp/aws"
+      source  = "hashicorp/aws"
       version = "~> 5.0"
     }
   }
@@ -83,5 +83,5 @@ resource "aws_s3_bucket_policy" "host-bucket-policy" {
 # This gives you the URL to access
 output "s3_url" {
   description = "Public website endpoint for the S3 bucket."
-  value = aws_s3_bucket_website_configuration.website.website_endpoint
+  value       = aws_s3_bucket_website_configuration.website.website_endpoint
 }
