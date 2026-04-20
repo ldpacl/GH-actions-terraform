@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - terraform/**
+
   push:
     branches:
       - main
@@ -13,7 +14,7 @@ on:
       - terraform/**
 
 permissions:
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
 
@@ -36,6 +37,51 @@ jobs:
     steps:
       - name: Checkout the repo to the runner
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+
+      - name: Detect secrets
+        id: detect_secrets
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/detect-secrets.log"
+          : > "$LOG_FILE"
+          python3 -m pip install --user --upgrade pip >>"$LOG_FILE" 2>&1
+          pip install --user "detect-secrets>=1.5.0" >>"$LOG_FILE" 2>&1
+          export PATH="$HOME/.local/bin:$PATH"
+          set +e
+          # --exclude-files values are Python regexes (not globs). Avoid ** which is invalid.
+          detect-secrets scan --all-files \
+            --exclude-files '(^|/)\.git(/|$)' \
+            --exclude-files '(^|/)\.terraform(/|$)' \
+            --exclude-files '(^|/)\.ci-logs(/|$)' \
+            --exclude-files '\.tfstate' \
+            . > /tmp/secrets.json 2> /tmp/secrets.err
+          SCAN_EXIT=$?
+          set -e
+          {
+            echo "=== detect-secrets exit code ==="
+            echo "$SCAN_EXIT"
+            echo "=== detect-secrets stderr ==="
+            cat /tmp/secrets.err
+            echo "=== scan JSON (first 400 lines) ==="
+            set +o pipefail
+            jq . /tmp/secrets.json | head -n 400 || true
+            set -o pipefail
+          } >>"$LOG_FILE" 2>&1
+          if [ "$SCAN_EXIT" -ne 0 ]; then
+            echo "::error::detect-secrets scan command failed (exit $SCAN_EXIT)." >>"$LOG_FILE"
+            exit "$SCAN_EXIT"
+          fi
+          COUNT="$(jq '.results | keys | length' /tmp/secrets.json)"
+          echo "Finding count: $COUNT" >>"$LOG_FILE"
+          if [ "${COUNT:-0}" -ne 0 ]; then
+            echo "::error::detect-secrets reported $COUNT finding(s). Remove secrets or add a reviewed baseline, then re-run."
+            exit 1
+          fi
 
       - name: Setup Terraform with latest version
         uses: hashicorp/setup-terraform@v4
@@ -47,7 +93,8 @@ jobs:
         continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: |
           set -o pipefail
-          LOG_FILE="$RUNNER_TEMP/init.log"
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/init.log"
           terraform init -backend-config="bucket=$BUCKET_TF_STATE" 2>&1 | tee "$LOG_FILE"
           EXIT=${PIPESTATUS[0]}
           if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
@@ -55,12 +102,6 @@ jobs:
             tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
             mv "${LOG_FILE}.new" "$LOG_FILE"
           fi
-          delim="INITLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
-          {
-            echo "log<<$delim"
-            cat "$LOG_FILE"
-            echo "$delim"
-          } >>"$GITHUB_OUTPUT"
           exit "$EXIT"
 
       - name: Terraform format
@@ -68,20 +109,37 @@ jobs:
         continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: |
           set -o pipefail
-          LOG_FILE="$RUNNER_TEMP/format.log"
-          terraform fmt -check 2>&1 | tee "$LOG_FILE"
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/format.log"
+          # -diff lists needed edits; filenames appear in the diff / list output
+          terraform fmt -check -diff -recursive 2>&1 | tee "$LOG_FILE"
           EXIT=${PIPESTATUS[0]}
           if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
             printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
             tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
             mv "${LOG_FILE}.new" "$LOG_FILE"
           fi
-          delim="FMTLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
-          {
-            echo "log<<$delim"
-            cat "$LOG_FILE"
-            echo "$delim"
-          } >>"$GITHUB_OUTPUT"
+          exit "$EXIT"
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: TFLint
+        id: tflint
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/tflint.log"
+          TFLINT_CONFIG="${GITHUB_WORKSPACE}/resources/tflint.hcl"
+          tflint --init --config "$TFLINT_CONFIG" 2>&1 | tee "$LOG_FILE"
+          tflint --config "$TFLINT_CONFIG" --recursive 2>&1 | tee -a "$LOG_FILE"
+          EXIT=${PIPESTATUS[0]}
+          if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
+            printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
+            tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
+            mv "${LOG_FILE}.new" "$LOG_FILE"
+          fi
           exit "$EXIT"
 
       - name: Terraform validate
@@ -89,7 +147,8 @@ jobs:
         continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: |
           set -o pipefail
-          LOG_FILE="$RUNNER_TEMP/validate.log"
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/validate.log"
           terraform validate 2>&1 | tee "$LOG_FILE"
           EXIT=${PIPESTATUS[0]}
           if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
@@ -97,13 +156,50 @@ jobs:
             tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
             mv "${LOG_FILE}.new" "$LOG_FILE"
           fi
-          delim="VALLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
-          {
-            echo "log<<$delim"
-            cat "$LOG_FILE"
-            echo "$delim"
-          } >>"$GITHUB_OUTPUT"
           exit "$EXIT"
+
+      - name: Update README.md with terraform-docs
+        id: tfdocs
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/tfdocs.log"
+          TD_VER="0.19.0"
+          curl -sSLo /tmp/td.tgz "https://github.com/terraform-docs/terraform-docs/releases/download/v${TD_VER}/terraform-docs-v${TD_VER}-linux-amd64.tar.gz"
+          tar -xzf /tmp/td.tgz -C /tmp terraform-docs
+          sudo install -m0755 /tmp/terraform-docs /usr/local/bin/terraform-docs
+          GEN=/tmp/tf-docs-README.md
+          set +e
+          set -o pipefail
+          terraform-docs markdown table terraform --config resources/.terraform-docs.yml 2>&1 | tee "$LOG_FILE" > "$GEN"
+          TD_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$TD_EXIT" -ne 0 ]; then
+            exit "$TD_EXIT"
+          fi
+          ROOT_README="${GITHUB_WORKSPACE}/README.md"
+          [ -f "$ROOT_README" ] || : > "$ROOT_README"
+          tr -d '\r' < "$ROOT_README" > /tmp/readme.lf
+          tr -d '\r' < "$GEN" > /tmp/gen.lf
+          if diff -q /tmp/readme.lf /tmp/gen.lf >/dev/null; then
+            echo "README.md already up to date." | tee -a "$LOG_FILE"
+            exit 0
+          fi
+          cp "$GEN" "$ROOT_README"
+          echo "README.md updated from terraform-docs output." | tee -a "$LOG_FILE"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            if git diff --cached --quiet; then
+              echo "No README.md changes to commit." | tee -a "$LOG_FILE"
+              exit 0
+            fi
+            git commit -m "docs: update terraform docs"
+            git push | tee -a "$LOG_FILE"
+          fi
 
       - name: Terraform plan
         id: plan
@@ -111,7 +207,8 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          LOG_FILE="$RUNNER_TEMP/plan.log"
+          mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
+          LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/plan.log"
           terraform plan -no-color -input=false 2>&1 | tee "$LOG_FILE"
           EXIT=${PIPESTATUS[0]}
           if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
@@ -119,28 +216,33 @@ jobs:
             tail -c 10000 "$LOG_FILE" >>"${LOG_FILE}.new"
             mv "${LOG_FILE}.new" "$LOG_FILE"
           fi
-          delim="PLANLOG_${GITHUB_RUN_ID}_${RANDOM}_EOF"
-          {
-            echo "log<<$delim"
-            cat "$LOG_FILE"
-            echo "$delim"
-          } >>"$GITHUB_OUTPUT"
           exit "$EXIT"
 
       - uses: actions/github-script@v7
         if: always() && github.event_name == 'pull_request'
         env:
+          DETECT_SECRETS_OUTCOME: ${{ steps.detect_secrets.outcome }}
           INIT_OUTCOME: ${{ steps.init.outcome }}
           FORMAT_OUTCOME: ${{ steps.format.outcome }}
+          TFLINT_OUTCOME: ${{ steps.tflint.outcome }}
           VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
           PLAN_OUTCOME: ${{ steps.plan.outcome }}
-          INIT_LOG: ${{ steps.init.outputs.log }}
-          FORMAT_LOG: ${{ steps.format.outputs.log }}
-          VALIDATE_LOG: ${{ steps.validate.outputs.log }}
-          PLAN_LOG: ${{ steps.plan.outputs.log }}
         with:
           script: |
+            const fs = require('fs');
+            const path = require('path');
+
             const marker = '<!-- gh-actions-terraform-ci-report -->';
+
+            function readLog(name) {
+              const p = path.join(process.env.GITHUB_WORKSPACE, '.ci-logs', `${name}.log`);
+              try {
+                const text = fs.readFileSync(p, 'utf8');
+                return text.trim().length ? text : '_Log file was empty._';
+              } catch (e) {
+                return `_No log file (step may have been skipped or not run yet): \`${p}\`._`;
+              }
+            }
 
             function escFence(s) {
               // Break accidental ``` sequences so they do not terminate the markdown fence.
@@ -178,8 +280,10 @@ jobs:
             }
 
             const outcomes = [
+              process.env.DETECT_SECRETS_OUTCOME,
               process.env.INIT_OUTCOME,
               process.env.FORMAT_OUTCOME,
+              process.env.TFLINT_OUTCOME,
               process.env.VALIDATE_OUTCOME,
               process.env.PLAN_OUTCOME,
             ];
@@ -193,13 +297,17 @@ jobs:
               '',
               summaryLine,
               '',
-              section('Terraform init', process.env.INIT_OUTCOME, process.env.INIT_LOG),
+              section('Detect secrets', process.env.DETECT_SECRETS_OUTCOME, readLog('detect-secrets')),
               '',
-              section('Terraform format (`fmt -check`)', process.env.FORMAT_OUTCOME, process.env.FORMAT_LOG),
+              section('Terraform init', process.env.INIT_OUTCOME, readLog('init')),
               '',
-              section('Terraform validate', process.env.VALIDATE_OUTCOME, process.env.VALIDATE_LOG),
+              section('Terraform format (`fmt -check -diff`)', process.env.FORMAT_OUTCOME, readLog('format')),
               '',
-              section('Terraform plan', process.env.PLAN_OUTCOME, process.env.PLAN_LOG),
+              section('TFLint', process.env.TFLINT_OUTCOME, readLog('tflint')),
+              '',
+              section('Terraform validate', process.env.VALIDATE_OUTCOME, readLog('validate')),
+              '',
+              section('Terraform plan', process.env.PLAN_OUTCOME, readLog('plan')),
               '',
               `*Workflow: \`${process.env.GITHUB_RUN_ID}\` · Actor: @${process.env.GITHUB_ACTOR}*`,
             ].join('\n');
@@ -233,8 +341,10 @@ jobs:
         if: >-
           always() &&
           github.event_name == 'pull_request' &&
-          (steps.init.outcome == 'failure' ||
+          (steps.detect_secrets.outcome == 'failure' ||
+           steps.init.outcome == 'failure' ||
            steps.format.outcome == 'failure' ||
+           steps.tflint.outcome == 'failure' ||
            steps.validate.outcome == 'failure' ||
            steps.plan.outcome == 'failure')
         run: exit 1
@@ -242,3 +352,20 @@ jobs:
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve -input=false
+
+  pr-merge-gate:
+    name: terraform-merge-gate
+    if: always() && github.event_name == 'pull_request'
+    needs: [terraform]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require Terraform workflow success
+        env:
+          TERRAFORM_RESULT: ${{ needs.terraform.result }}
+        run: |
+          echo "Terraform job result: $TERRAFORM_RESULT"
+          if [ "$TERRAFORM_RESULT" != "success" ]; then
+            echo "::error::Terraform checks did not succeed (job result: $TERRAFORM_RESULT). Fix failures or wait for a green run before merging to main."
+            exit 1
+          fi
+          echo "Terraform checks succeeded; OK to merge (subject to branch protection rules)."
