@@ -232,3 +232,20 @@ jobs:
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve -input=false
+
+  pr-merge-gate:
+    name: terraform-merge-gate
+    if: always() && github.event_name == 'pull_request'
+    needs: [terraform]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require Terraform workflow success
+        env:
+          TERRAFORM_RESULT: ${{ needs.terraform.result }}
+        run: |
+          echo "Terraform job result: $TERRAFORM_RESULT"
+          if [ "$TERRAFORM_RESULT" != "success" ]; then
+            echo "::error::Terraform checks did not succeed (job result: $TERRAFORM_RESULT). Fix failures or wait for a green run before merging to main."
+            exit 1
+          fi
+          echo "Terraform checks succeeded; OK to merge (subject to branch protection rules)."
