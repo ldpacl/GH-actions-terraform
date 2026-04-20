@@ -131,8 +131,9 @@ jobs:
           set -o pipefail
           mkdir -p "$GITHUB_WORKSPACE/.ci-logs"
           LOG_FILE="$GITHUB_WORKSPACE/.ci-logs/tflint.log"
-          tflint --init
-          tflint --config "${GITHUB_WORKSPACE}/resources/tflint.hcl" --recursive 2>&1 | tee "$LOG_FILE"
+          TFLINT_CONFIG="${GITHUB_WORKSPACE}/resources/tflint.hcl"
+          tflint --init --config "$TFLINT_CONFIG" 2>&1 | tee "$LOG_FILE"
+          tflint --config "$TFLINT_CONFIG" --recursive 2>&1 | tee -a "$LOG_FILE"
           EXIT=${PIPESTATUS[0]}
           if [ "$(stat -c%s "$LOG_FILE")" -gt 12000 ]; then
             printf '%s\n' "... (log truncated, showing last 10KB) ..." >"${LOG_FILE}.new"
