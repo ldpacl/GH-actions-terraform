@@ -37,32 +37,6 @@ flowchart TD
   J --> K[terraform apply]
 ```
 
-If your Markdown preview does not support Mermaid, use this text diagram:
-
-```text
-Developer Push / PR
-        |
-        v
-GitHub Actions (action.yml)
-   |        |         |         |
-   v        v         v         v
-detect-  terraform   tflint  terraform-docs
-secrets  checks
-   \        |         /
-    \       |        /
-     +------v-------+
-         Fail Gate
-             |
-             v
-      pr-merge-gate
-             |
-             v
-       Merge to main
-             |
-             v
-       terraform apply
-```
-
 ## Workflow Overview
 
 Workflow file: `.github/workflows/action.yml`
