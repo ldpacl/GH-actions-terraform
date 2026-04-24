@@ -20,7 +20,7 @@ provider "aws" {
 
 # Creating bucket
 resource "aws_s3_bucket" "host-bucket" {
-  bucket = "tftestingbucket-dpac"
+  bucket = "tftestingbucket-dpac-new"
 }
 
 # Enforcing object ownership controls
